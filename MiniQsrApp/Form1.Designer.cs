@@ -61,8 +61,6 @@
             btnRunQuery.Text = "SQL ausführen";
             btnRunQuery.UseVisualStyleBackColor = false;
             btnRunQuery.Click += btnRunQuery_Click;
-            btnRunQuery.MouseEnter += btnRunQuery_MouseEnter;
-            btnRunQuery.MouseLeave += btnRunQuery_MouseLeave;
             // 
             // txtSqlQuery
             // 
@@ -92,8 +90,6 @@
             btnExportPdf.Text = "Export PDF";
             btnExportPdf.UseVisualStyleBackColor = false;
             btnExportPdf.Click += btnExportPdf_Click;
-            btnExportPdf.MouseEnter += btnExportPdf_MouseEnter;
-            btnExportPdf.MouseLeave += btnExportPdf_MouseLeave;
             // 
             // btnShowTabels
             // 
@@ -163,7 +159,6 @@
             lblReportTitle.Text = "label1";
             lblReportTitle.TextAlign = ContentAlignment.MiddleLeft;
             lblReportTitle.Visible = false;
-            lblReportTitle.Click += lblReportTitle_Click;
             // 
             // gridData
             // 
@@ -207,7 +202,6 @@
             Controls.Add(leftPanel);
             Name = "Form1";
             Text = "SQL_Reports";
-            Load += Form1_Load;
             topPanel.ResumeLayout(false);
             topPanel.PerformLayout();
             flowLayoutPanel1.ResumeLayout(false);
