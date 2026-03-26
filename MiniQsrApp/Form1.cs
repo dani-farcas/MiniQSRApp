@@ -2,41 +2,58 @@
 using PdfSharp.Drawing;
 using PdfSharp.Pdf;
 using System.Data;
+using System.Drawing;
+using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace MiniQsrApp
 {
     public partial class Form1 : Form
     {
-        // #############################
-        // KONSTANTEN & FELDER
-        // UI Größen + DB + SQL Keywords
-        // #############################
+        #region Constants
 
         private const int LeftPanelMinWidth = 120;
         private const int LeftPanelMaxWidth = 450;
         private const int ResizeGripWidth = 6;
 
+        #endregion Constants
+
+        #region Private Fields
+
         private readonly string _dbPath;
         private readonly DatabaseHelper _db;
+
+        private readonly HashSet<string> _sqlKeywords = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "select", "from", "where", "insert", "into", "values", "update", "set", "delete",
+            "create", "table", "drop", "alter", "join", "left", "right", "inner", "outer",
+            "on", "group", "by", "order", "having", "as", "and", "or", "not", "null", "is",
+            "in", "like", "distinct", "limit", "pragma", "asc", "desc", "between", "exists",
+            "case", "when", "then", "else", "end", "sum", "avg", "min", "max", "count",
+            "union", "all", "any", "some", "glob", "match", "regexp", "escape", "with",
+            "recursive", "without", "rowid", "if", "index", "view", "trigger", "begin",
+            "transaction", "commit", "rollback", "vacuum", "analyze", "explain", "query",
+            "plan", "attach", "detach", "reindex", "savepoint", "release", "rollback to",
+            "coalesce", "ifnull", "nullif", "typeof", "quote", "random", "randomblob",
+            "last_insert_rowid"
+        };
 
         private bool _isResizingLeftPanel;
         private int _leftPanelResizeStartX;
         private int _leftPanelStartWidth;
 
-        private readonly HashSet<string> _sqlKeywords = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "select","from","where","insert","into","values","update","set","delete",
-            "create","table","drop","alter","join","left","right","inner","outer",
-            "on","group","by","order","having","as","and","or","not","null","is",
-            "in","like","distinct","limit","pragma","asc","desc"
-        };
+        private List<string> _tableNames = new();
+        private List<string> _columnNames = new();
 
-        // #############################
-        // CONSTRUCTOR
-        // Initialisiert DB, UI und Events
-        // #############################
+        #endregion Private Fields
 
+        #region Constructors
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Initialisiert das Hauptformular, die Datenbank und die grundlegenden UI-Einstellungen.
+        /// </summary>
         public Form1()
         {
             InitializeComponent();
@@ -45,8 +62,17 @@ namespace MiniQsrApp
             _db = new DatabaseHelper(_dbPath);
 
             InitializeApplication();
+            RegisterEvents();
         }
 
+        #endregion Constructors
+
+        #region Initialization
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Initialisiert die Anwendung und bereitet die Startansicht vor.
+        /// </summary>
         private void InitializeApplication()
         {
             _db.InitializeDatabase();
@@ -55,28 +81,68 @@ namespace MiniQsrApp
             lblReportTitle.Visible = false;
 
             InitializeButtonStyles();
-            RegisterEvents();
+            InitializeGridStyles();
+            LoadSqlSuggestionData();
         }
 
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Registriert alle benötigten UI-Ereignisse.
+        /// </summary>
         private void RegisterEvents()
         {
             leftPanel.MouseDown += leftPanel_MouseDown;
             leftPanel.MouseMove += leftPanel_MouseMove;
             leftPanel.MouseUp += leftPanel_MouseUp;
+
             txtSqlQuery.KeyUp += txtSqlQuery_KeyUp;
+            txtSqlQuery.KeyDown += txtSqlQuery_KeyDown;
+
+            lstSqlSuggestions.DoubleClick += lstSqlSuggestions_DoubleClick;
+            lstSqlSuggestions.KeyDown += lstSqlSuggestions_KeyDown;
+
+            gridData.DataBindingComplete += gridData_DataBindingComplete;
         }
 
-        // #############################
-        // BUTTON DESIGN
-        // Einheitliches Styling
-        // #############################
-
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Initialisiert das Styling der Schaltflächen.
+        /// </summary>
         private void InitializeButtonStyles()
         {
             ConfigureButton(btnRunQuery, Color.FromArgb(37, 99, 235));
             ConfigureButton(btnExportPdf, Color.FromArgb(16, 185, 129));
         }
 
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Initialisiert die Standarddarstellung des Datenrasters.
+        /// </summary>
+        private void InitializeGridStyles()
+        {
+            gridData.AutoGenerateColumns = true;
+            gridData.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+            gridData.MultiSelect = false;
+            gridData.ReadOnly = true;
+            gridData.AllowUserToAddRows = false;
+            gridData.AllowUserToDeleteRows = false;
+            gridData.AllowUserToResizeRows = false;
+            gridData.RowHeadersVisible = false;
+            gridData.BackgroundColor = Color.White;
+            gridData.BorderStyle = BorderStyle.None;
+            gridData.EnableHeadersVisualStyles = false;
+
+            gridData.ColumnHeadersDefaultCellStyle.BackColor = Color.Gainsboro;
+            gridData.ColumnHeadersDefaultCellStyle.ForeColor = Color.Black;
+            gridData.ColumnHeadersDefaultCellStyle.Font = new Font(gridData.Font, FontStyle.Bold);
+        }
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Wendet ein einheitliches Standarddesign auf eine Schaltfläche an.
+        /// </summary>
+        /// <param name="button">Zu formatierende Schaltfläche.</param>
+        /// <param name="color">Hintergrundfarbe der Schaltfläche.</param>
         private void ConfigureButton(Button button, Color color)
         {
             button.BackColor = color;
@@ -86,92 +152,295 @@ namespace MiniQsrApp
             button.Cursor = Cursors.Hand;
         }
 
-        // #############################
-        // SQL AUSFÜHRUNG
-        // SELECT → Anzeige
-        // Andere → DB ändern
-        // #############################
+        #endregion Initialization
 
-        private void btnRunQuery_Click(object sender, EventArgs e)
+        #region Data Execution
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Führt eine SELECT-Abfrage aus und zeigt das Ergebnis im Grid an.
+        /// </summary>
+        /// <param name="sql">Auszuführende SELECT-Abfrage.</param>
+        private void ExecuteSelect(string sql)
         {
             try
             {
-                string sql = txtSqlQuery.Text.Trim();
+                gridData.DataSource = null;
 
-                if (string.IsNullOrWhiteSpace(sql))
-                {
-                    MessageBox.Show("Bitte geben Sie eine SQL-Abfrage ein.");
-                    return;
-                }
+                DataTable result = _db.RunQuery(sql);
 
-                if (sql.StartsWith("SELECT", StringComparison.OrdinalIgnoreCase))
-                {
-                    ExecuteSelect(sql);
-                }
-                else
-                {
-                    ExecuteNonSelect(sql);
-                }
+                BindDataToGrid(result);
+
+                lblReportTitle.Text = GenerateReportTitleFromSql(sql);
+                lblReportTitle.Visible = true;
             }
-            catch (Exception ex)
+            catch
             {
-                MessageBox.Show("SQL-Fehler: " + ex.Message);
+                gridData.DataSource = null;
+                lblReportTitle.Visible = false;
+                throw;
             }
         }
 
-        private void ExecuteSelect(string sql)
-        {
-            gridData.DataSource = _db.RunQuery(sql);
-
-            string title = GenerateReportTitleFromSql(sql);
-            lblReportTitle.Text = title;
-            lblReportTitle.Visible = true;
-        }
-
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Führt eine nicht-selektierende SQL-Anweisung aus und lädt die Standarddaten neu.
+        /// </summary>
+        /// <param name="sql">Auszuführende SQL-Anweisung.</param>
         private void ExecuteNonSelect(string sql)
         {
             _db.ExecuteCommand(sql);
-            gridData.DataSource = _db.GetData();
+
+            DataTable result = _db.GetData();
+            BindDataToGrid(result);
 
             lblReportTitle.Visible = false;
 
             MessageBox.Show("Befehl wurde erfolgreich ausgeführt.");
         }
 
-        // #############################
-        // PDF EXPORT
-        // Exportiert Grid in PDF
-        // #############################
-
-        private void btnExportPdf_Click(object sender, EventArgs e)
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Bindet Daten kontrolliert an das Grid und aktualisiert die Anzeige.
+        /// </summary>
+        /// <param name="data">Anzuzeigende Daten.</param>
+        private void BindDataToGrid(DataTable data)
         {
-            if (gridData.Rows.Count == 0)
-            {
-                MessageBox.Show("Keine Daten vorhanden.");
-                return;
-            }
+            ResetGridBeforeBinding();
 
-            string title = GenerateReportTitleFromSql(txtSqlQuery.Text);
-
-            using SaveFileDialog dialog = new()
-            {
-                Filter = "PDF (*.pdf)|*.pdf",
-                FileName = title + ".pdf"
-            };
-
-            if (dialog.ShowDialog() != DialogResult.OK)
-                return;
-
-            ExportPdf(dialog.FileName, title);
-
-            MessageBox.Show("PDF exportiert.");
+            gridData.DataSource = data;
+            gridData.Refresh();
+            gridData.ClearSelection();
         }
 
-        // #############################
-        // PDF GENERIERUNG
-        // Zeichnet Tabelle + Seitenumbruch
-        // #############################
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Setzt das Grid vor einem neuen Datenbinding sauber zurück.
+        /// </summary>
+        private void ResetGridBeforeBinding()
+        {
+            gridData.DataSource = null;
+            gridData.Columns.Clear();
+            gridData.AutoGenerateColumns = true;
+        }
 
+        #endregion Data Execution
+
+        #region Grid Highlighting
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Wird nach dem Binden neuer Daten ausgelöst und wendet die Highlight-Regeln stabil auf alle Zeilen an.
+        /// </summary>
+        /// <param name="sender">Quelle des Ereignisses.</param>
+        /// <param name="e">Enthält Ereignisdaten des DataBindings.</param>
+        private void gridData_DataBindingComplete(object sender, DataGridViewBindingCompleteEventArgs e)
+        {
+            ApplyHighlightingToGrid();
+            gridData.ClearSelection();
+        }
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Wendet Highlight-Regeln auf alle Datenzeilen des Grids an.
+        /// </summary>
+        private void ApplyHighlightingToGrid()
+        {
+            foreach (DataGridViewRow row in gridData.Rows)
+            {
+                if (row.IsNewRow)
+                {
+                    continue;
+                }
+
+                ResetRowStyle(row);
+
+                RowHighlightStyle? style = ResolveHighlightStyle(row);
+
+                if (style != null)
+                {
+                    ApplyRowStyle(row, style);
+                }
+            }
+        }
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Setzt den Standardstil einer Zeile zurück.
+        /// </summary>
+        /// <param name="row">Die zurückzusetzende Zeile.</param>
+        private void ResetRowStyle(DataGridViewRow row)
+        {
+            row.DefaultCellStyle.BackColor = Color.White;
+            row.DefaultCellStyle.ForeColor = Color.Black;
+            row.DefaultCellStyle.SelectionBackColor = Color.White;
+            row.DefaultCellStyle.SelectionForeColor = Color.Black;
+        }
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Wendet den finalen Highlight-Stil auf eine Zeile an.
+        /// </summary>
+        /// <param name="row">Die zu formatierende Zeile.</param>
+        /// <param name="style">Der anzuwendende Stil.</param>
+        private void ApplyRowStyle(DataGridViewRow row, RowHighlightStyle style)
+        {
+            row.DefaultCellStyle.BackColor = style.BackColor;
+            row.DefaultCellStyle.ForeColor = style.ForeColor;
+            row.DefaultCellStyle.SelectionBackColor = style.SelectionBackColor;
+            row.DefaultCellStyle.SelectionForeColor = style.SelectionForeColor;
+        }
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Ermittelt anhand allgemeiner Text- und Zahlenregeln, ob eine Zeile hervorgehoben werden soll.
+        /// </summary>
+        /// <param name="row">Die zu prüfende Zeile.</param>
+        /// <returns>Ein Highlight-Stil oder null, wenn keine Regel zutrifft.</returns>
+        private RowHighlightStyle? ResolveHighlightStyle(DataGridViewRow row)
+        {
+            bool hasNegativeNumber = false;
+            bool hasPositiveNumber = false;
+            bool hasZeroNumber = false;
+
+            foreach (DataGridViewCell cell in row.Cells)
+            {
+                object? value = cell.Value;
+
+                if (value == null || value == DBNull.Value)
+                {
+                    continue;
+                }
+
+                string text = value.ToString()?.Trim() ?? string.Empty;
+
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    continue;
+                }
+
+                string normalizedText = text.ToUpperInvariant();
+
+                if (ContainsNegativeKeyword(normalizedText))
+                {
+                    return RowHighlightStyle.Negative();
+                }
+
+                if (ContainsNeutralKeyword(normalizedText))
+                {
+                    return RowHighlightStyle.Neutral();
+                }
+
+                if (ContainsPositiveKeyword(normalizedText))
+                {
+                    return RowHighlightStyle.Positive();
+                }
+
+                if (TryParseDecimal(text, out decimal number))
+                {
+                    if (number < 0)
+                    {
+                        hasNegativeNumber = true;
+                    }
+                    else if (number > 0)
+                    {
+                        hasPositiveNumber = true;
+                    }
+                    else
+                    {
+                        hasZeroNumber = true;
+                    }
+                }
+            }
+
+            if (hasNegativeNumber)
+            {
+                return RowHighlightStyle.Negative();
+            }
+
+            if (hasPositiveNumber)
+            {
+                return RowHighlightStyle.Positive();
+            }
+
+            if (hasZeroNumber)
+            {
+                return RowHighlightStyle.Zero();
+            }
+
+            return null;
+        }
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Prüft, ob ein Text einen negativen oder kritischen Begriff enthält.
+        /// </summary>
+        /// <param name="text">Bereits normalisierter Text in Großbuchstaben.</param>
+        /// <returns>True, wenn ein negativer Begriff erkannt wurde.</returns>
+        private bool ContainsNegativeKeyword(string text)
+        {
+            return text.Contains("RISIKO")
+                || text.Contains("FEHLER")
+                || text.Contains("KRITISCH")
+                || text.Contains("NEGATIV")
+                || text.Contains("ABGELEHNT")
+                || text.Contains("INAKTIV")
+                || text.Contains("OFFEN");
+        }
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Prüft, ob ein Text einen positiven Begriff enthält.
+        /// </summary>
+        /// <param name="text">Bereits normalisierter Text in Großbuchstaben.</param>
+        /// <returns>True, wenn ein positiver Begriff erkannt wurde.</returns>
+        private bool ContainsPositiveKeyword(string text)
+        {
+            return text.Contains("AKTIV")
+                || text.Contains("OK")
+                || text.Contains("ERFOLG")
+                || text.Contains("BESTANDEN")
+                || text.Contains("ABGESCHLOSSEN")
+                || text.Contains("POSITIV");
+        }
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Prüft, ob ein Text einen neutralen oder warnenden Begriff enthält.
+        /// </summary>
+        /// <param name="text">Bereits normalisierter Text in Großbuchstaben.</param>
+        /// <returns>True, wenn ein neutraler Begriff erkannt wurde.</returns>
+        private bool ContainsNeutralKeyword(string text)
+        {
+            return text.Contains("WARNUNG")
+                || text.Contains("NEUTRAL")
+                || text.Contains("PENDING")
+                || text.Contains("UNBEKANNT");
+        }
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Versucht, einen Text robust als Dezimalzahl zu interpretieren.
+        /// </summary>
+        /// <param name="text">Zu interpretierender Text.</param>
+        /// <param name="number">Das erkannte numerische Ergebnis.</param>
+        /// <returns>True, wenn die Konvertierung erfolgreich war.</returns>
+        private bool TryParseDecimal(string text, out decimal number)
+        {
+            return decimal.TryParse(text, NumberStyles.Any, CultureInfo.CurrentCulture, out number)
+                || decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out number);
+        }
+
+        #endregion Grid Highlighting
+
+        #region PDF Export
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Exportiert die aktuell angezeigten Grid-Daten als PDF-Datei.
+        /// </summary>
+        /// <param name="filePath">Zielpfad der PDF-Datei.</param>
+        /// <param name="title">Titel des Reports.</param>
         private void ExportPdf(string filePath, string title)
         {
             PdfDocument doc = new();
@@ -188,44 +457,46 @@ namespace MiniQsrApp
             double y = margin;
             double rowHeight = 20;
 
-            gfx.DrawString(title, titleFont, XBrushes.Black,
-                new XRect(margin, y, page.Width, rowHeight));
-
+            gfx.DrawString(title, titleFont, XBrushes.Black, new XRect(margin, y, page.Width, rowHeight));
             y += 30;
 
-            var visibleColumns = gridData.Columns
+            List<DataGridViewColumn> visibleColumns = gridData.Columns
                 .Cast<DataGridViewColumn>()
-                .Where(c => c.Visible)
+                .Where(column => column.Visible)
                 .ToList();
 
-            double colWidth = (page.Width - 2 * margin) / visibleColumns.Count;
+            if (visibleColumns.Count == 0)
+            {
+                return;
+            }
 
-            // Header
+            double colWidth = (page.Width - 2 * margin) / visibleColumns.Count;
             double x = margin;
-            foreach (var col in visibleColumns)
+
+            foreach (DataGridViewColumn column in visibleColumns)
             {
                 gfx.DrawRectangle(XPens.Black, XBrushes.LightGray, x, y, colWidth, rowHeight);
-                gfx.DrawString(col.HeaderText, header, XBrushes.Black,
-                    new XRect(x + 2, y + 2, colWidth, rowHeight));
+                gfx.DrawString(column.HeaderText, header, XBrushes.Black, new XRect(x + 2, y + 2, colWidth, rowHeight));
                 x += colWidth;
             }
 
             y += rowHeight;
 
-            // Rows
             foreach (DataGridViewRow row in gridData.Rows)
             {
-                if (row.IsNewRow) continue;
+                if (row.IsNewRow)
+                {
+                    continue;
+                }
 
                 x = margin;
 
-                foreach (var col in visibleColumns)
+                foreach (DataGridViewColumn column in visibleColumns)
                 {
-                    string text = row.Cells[col.Index].Value?.ToString() ?? "";
+                    string text = row.Cells[column.Index].Value?.ToString() ?? string.Empty;
 
                     gfx.DrawRectangle(XPens.Black, x, y, colWidth, rowHeight);
-                    gfx.DrawString(text, font, XBrushes.Black,
-                        new XRect(x + 2, y + 2, colWidth, rowHeight));
+                    gfx.DrawString(text, font, XBrushes.Black, new XRect(x + 2, y + 2, colWidth, rowHeight));
 
                     x += colWidth;
                 }
@@ -243,51 +514,294 @@ namespace MiniQsrApp
             doc.Save(filePath);
         }
 
-        // #############################
-        // DATABASE STRUCTURE
-        // Lädt Tabellen + Spalten in TreeView
-        // #############################
+        #endregion PDF Export
 
-        private void btnShowTables_Click(object sender, EventArgs e)
-        {
-            if (leftPanel.Width == 0)
-            {
-                leftPanel.Width = 180;
-                LoadStructure();
-            }
-            else
-            {
-                leftPanel.Width = 0;
-            }
-        }
+        #region Database Structure
 
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Lädt die Tabellenstruktur der Datenbank in die TreeView.
+        /// </summary>
         private void LoadStructure()
         {
             treeDatabase.Nodes.Clear();
 
-            var tables = _db.RunQuery("SELECT name FROM sqlite_master WHERE type='table'");
+            DataTable tables = _db.RunQuery("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name");
 
-            foreach (DataRow t in tables.Rows)
+            foreach (DataRow tableRow in tables.Rows)
             {
-                string name = t["name"].ToString();
-                TreeNode tableNode = new(name);
+                string tableName = tableRow["name"]?.ToString() ?? string.Empty;
+                TreeNode tableNode = new(tableName);
 
-                var cols = _db.RunQuery($"PRAGMA table_info({name})");
+                DataTable columns = _db.RunQuery($"PRAGMA table_info({tableName})");
 
-                foreach (DataRow c in cols.Rows)
+                foreach (DataRow columnRow in columns.Rows)
                 {
-                    tableNode.Nodes.Add($"{c["name"]} ({c["type"]})");
+                    string columnName = columnRow["name"]?.ToString() ?? string.Empty;
+                    string columnType = columnRow["type"]?.ToString() ?? string.Empty;
+
+                    tableNode.Nodes.Add($"{columnName} ({columnType})");
                 }
 
                 treeDatabase.Nodes.Add(tableNode);
             }
         }
 
-        // #############################
-        // PANEL RESIZE
-        // Drag zum Vergrößern
-        // #############################
+        #endregion Database Structure
 
+        #region Report Helpers
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Erstellt einen Reporttitel basierend auf dem verwendeten SQL-Statement.
+        /// </summary>
+        /// <param name="sql">SQL-Text zur Ermittlung des Reportnamens.</param>
+        /// <returns>Generierter Reporttitel.</returns>
+        private string GenerateReportTitleFromSql(string sql)
+        {
+            if (string.IsNullOrWhiteSpace(sql))
+            {
+                return "SQL_Report";
+            }
+
+            Match match = Regex.Match(sql, @"FROM\s+(\w+)", RegexOptions.IgnoreCase);
+            string tableName = match.Success ? match.Groups[1].Value : "Report";
+
+            return $"Bericht_{tableName}";
+        }
+
+        #endregion Report Helpers
+
+        #region SQL Autocomplete
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Lädt alle verfügbaren Tabellen- und Spaltennamen für die SQL-Autovervollständigung.
+        /// </summary>
+        private void LoadSqlSuggestionData()
+        {
+            _tableNames = _db.GetTables();
+            _columnNames = _db.GetAllColumns();
+        }
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Analysiert die aktuelle Cursorposition und zeigt passende SQL-Vorschläge an.
+        /// </summary>
+        private void ShowSqlSuggestions()
+        {
+            int caretPosition = txtSqlQuery.SelectionStart;
+            string textBeforeCursor = txtSqlQuery.Text[..caretPosition];
+
+            Match match = Regex.Match(textBeforeCursor, @"(\w+)$");
+
+            if (!match.Success)
+            {
+                lstSqlSuggestions.Visible = false;
+                return;
+            }
+
+            string currentWord = match.Groups[1].Value;
+
+            if (string.IsNullOrWhiteSpace(currentWord))
+            {
+                lstSqlSuggestions.Visible = false;
+                return;
+            }
+
+            List<string> source = GetSuggestionSource(textBeforeCursor);
+
+            List<string> matches = source
+                .Where(item => item.StartsWith(currentWord, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(item => item)
+                .ToList();
+
+            if (matches.Count == 0)
+            {
+                lstSqlSuggestions.Visible = false;
+                return;
+            }
+
+            lstSqlSuggestions.Items.Clear();
+
+            foreach (string item in matches)
+            {
+                lstSqlSuggestions.Items.Add(item);
+            }
+
+            lstSqlSuggestions.SelectedIndex = 0;
+            lstSqlSuggestions.Width = 220;
+            lstSqlSuggestions.Height = Math.Min(140, matches.Count * 22 + 4);
+            lstSqlSuggestions.Left = txtSqlQuery.Left;
+            lstSqlSuggestions.Top = txtSqlQuery.Bottom + 4;
+            lstSqlSuggestions.Visible = true;
+            lstSqlSuggestions.BringToFront();
+        }
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Ermittelt anhand des bisherigen SQL-Texts, ob Tabellen- oder Spaltenvorschläge angezeigt werden sollen.
+        /// </summary>
+        /// <param name="textBeforeCursor">SQL-Text vor der Cursorposition.</param>
+        /// <returns>Passende Vorschlagsquelle.</returns>
+        private List<string> GetSuggestionSource(string textBeforeCursor)
+        {
+            string upperText = textBeforeCursor.ToUpperInvariant();
+
+            if (Regex.IsMatch(upperText, @"\b(FROM|JOIN|UPDATE|INTO)\s+\w*$"))
+            {
+                return _tableNames;
+            }
+
+            if (Regex.IsMatch(upperText, @"\b(SELECT|WHERE|ON|AND|OR)\s+[\w\.]*$"))
+            {
+                return _columnNames;
+            }
+
+            return _tableNames;
+        }
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Ersetzt das aktuell geschriebene Wort durch den ausgewählten SQL-Vorschlag.
+        /// </summary>
+        private void InsertSelectedSuggestionSmart()
+        {
+            if (lstSqlSuggestions.SelectedItem == null)
+            {
+                return;
+            }
+
+            string suggestion = lstSqlSuggestions.SelectedItem.ToString() ?? string.Empty;
+
+            int caretPosition = txtSqlQuery.SelectionStart;
+            string text = txtSqlQuery.Text;
+
+            Match match = Regex.Match(text[..caretPosition], @"(\w+)$");
+
+            if (!match.Success)
+            {
+                return;
+            }
+
+            int wordStart = match.Index;
+            string newText = text[..wordStart] + suggestion + text[caretPosition..];
+
+            txtSqlQuery.Text = newText;
+            txtSqlQuery.SelectionStart = wordStart + suggestion.Length;
+            txtSqlQuery.Focus();
+
+            lstSqlSuggestions.Visible = false;
+        }
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Fügt den ausgewählten Vorschlag am Ende des SQL-Textes ein.
+        /// </summary>
+        private void InsertSelectedSuggestion()
+        {
+            if (lstSqlSuggestions.SelectedItem == null)
+            {
+                return;
+            }
+
+            string suggestion = lstSqlSuggestions.SelectedItem.ToString() ?? string.Empty;
+
+            txtSqlQuery.Text += suggestion + " ";
+            txtSqlQuery.Focus();
+            lstSqlSuggestions.Visible = false;
+        }
+
+        #endregion SQL Autocomplete
+
+        #region SQL Formatting
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Formatiert die SQL-Abfrage, indem bekannte Schlüsselwörter in Großbuchstaben umgewandelt werden.
+        /// </summary>
+        /// <param name="sql">Zu formatierender SQL-Text.</param>
+        /// <returns>Formatierter SQL-Text.</returns>
+        private string FormatSql(string sql)
+        {
+            string[] tokens = Regex.Split(sql, @"(\W)");
+            StringBuilder result = new();
+
+            foreach (string token in tokens)
+            {
+                string cleanToken = token.Trim();
+
+                if (_sqlKeywords.Contains(cleanToken))
+                {
+                    result.Append(cleanToken.ToUpperInvariant());
+                }
+                else
+                {
+                    result.Append(token);
+                }
+            }
+
+            return result.ToString();
+        }
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Formatiert den SQL-Text, ohne die aktuelle Cursorposition des Benutzers zu verändern.
+        /// </summary>
+        /// <param name="sql">Zu formatierender SQL-Text.</param>
+        /// <param name="caretPosition">Aktuelle Cursorposition.</param>
+        /// <param name="newCaretPosition">Neue Cursorposition nach der Formatierung.</param>
+        /// <returns>Formatierter SQL-Text.</returns>
+        private string FormatSqlPreserveCaret(string sql, int caretPosition, out int newCaretPosition)
+        {
+            MatchCollection matches = Regex.Matches(sql, @"\w+");
+            StringBuilder result = new(sql);
+
+            int offset = 0;
+            newCaretPosition = caretPosition;
+
+            foreach (Match match in matches)
+            {
+                string word = match.Value;
+
+                if (!_sqlKeywords.Contains(word))
+                {
+                    continue;
+                }
+
+                string upperWord = word.ToUpperInvariant();
+
+                if (word == upperWord)
+                {
+                    continue;
+                }
+
+                int startIndex = match.Index + offset;
+                result.Remove(startIndex, word.Length);
+                result.Insert(startIndex, upperWord);
+
+                int difference = upperWord.Length - word.Length;
+                offset += difference;
+
+                if (startIndex < caretPosition)
+                {
+                    newCaretPosition += difference;
+                }
+            }
+
+            return result.ToString();
+        }
+
+        #endregion SQL Formatting
+
+        #region Panel Resizing
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Startet die Größenänderung des linken Panels, wenn der Benutzer den Ziehbereich anklickt.
+        /// </summary>
+        /// <param name="sender">Quelle des Ereignisses.</param>
+        /// <param name="e">Enthält Mausdaten.</param>
         private void leftPanel_MouseDown(object sender, MouseEventArgs e)
         {
             if (e.X >= leftPanel.Width - ResizeGripWidth)
@@ -298,6 +812,12 @@ namespace MiniQsrApp
             }
         }
 
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Ändert die Breite des linken Panels während des Ziehvorgangs.
+        /// </summary>
+        /// <param name="sender">Quelle des Ereignisses.</param>
+        /// <param name="e">Enthält Mausdaten.</param>
         private void leftPanel_MouseMove(object sender, MouseEventArgs e)
         {
             if (!_isResizingLeftPanel)
@@ -314,54 +834,251 @@ namespace MiniQsrApp
             leftPanel.Width = Math.Max(LeftPanelMinWidth, Math.Min(newWidth, LeftPanelMaxWidth));
         }
 
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Beendet die Größenänderung des linken Panels.
+        /// </summary>
+        /// <param name="sender">Quelle des Ereignisses.</param>
+        /// <param name="e">Enthält Mausdaten.</param>
         private void leftPanel_MouseUp(object sender, MouseEventArgs e)
         {
             _isResizingLeftPanel = false;
         }
 
-        // #############################
-        // SQL AUTO UPPERCASE
-        // Keywords automatisch groß
-        // #############################
+        #endregion Panel Resizing
 
+        #region Event Handlers
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Führt die eingegebene SQL-Abfrage aus und unterscheidet zwischen SELECT- und Nicht-SELECT-Anweisungen.
+        /// </summary>
+        /// <param name="sender">Quelle des Ereignisses.</param>
+        /// <param name="e">Enthält Ereignisdaten.</param>
+        private void btnRunQuery_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                string sql = txtSqlQuery.Text.Trim();
+                sql = FormatSql(sql);
+                txtSqlQuery.Text = sql;
+
+                if (string.IsNullOrWhiteSpace(sql))
+                {
+                    MessageBox.Show("Bitte geben Sie eine SQL-Abfrage ein.");
+                    return;
+                }
+
+                if (sql.StartsWith("SELECT", StringComparison.OrdinalIgnoreCase) ||
+                    sql.StartsWith("WITH", StringComparison.OrdinalIgnoreCase))
+                {
+                    ExecuteSelect(sql);
+                }
+                else
+                {
+                    ExecuteNonSelect(sql);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("SQL-Fehler: " + ex.Message);
+            }
+        }
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Exportiert die aktuell angezeigten Daten als PDF-Datei.
+        /// </summary>
+        /// <param name="sender">Quelle des Ereignisses.</param>
+        /// <param name="e">Enthält Ereignisdaten.</param>
+        private void btnExportPdf_Click(object sender, EventArgs e)
+        {
+            if (gridData.Rows.Count == 0)
+            {
+                MessageBox.Show("Keine Daten vorhanden.");
+                return;
+            }
+
+            string title = GenerateReportTitleFromSql(txtSqlQuery.Text);
+
+            using SaveFileDialog dialog = new()
+            {
+                Filter = "PDF (*.pdf)|*.pdf",
+                FileName = title + ".pdf"
+            };
+
+            if (dialog.ShowDialog() != DialogResult.OK)
+            {
+                return;
+            }
+
+            ExportPdf(dialog.FileName, title);
+
+            MessageBox.Show("PDF exportiert.");
+        }
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Blendet das linke Strukturpanel ein oder aus und lädt bei Bedarf die Datenbankstruktur.
+        /// </summary>
+        /// <param name="sender">Quelle des Ereignisses.</param>
+        /// <param name="e">Enthält Ereignisdaten.</param>
+        private void btnShowTables_Click(object sender, EventArgs e)
+        {
+            if (leftPanel.Width == 0)
+            {
+                leftPanel.Width = 180;
+                LoadStructure();
+            }
+            else
+            {
+                leftPanel.Width = 0;
+            }
+        }
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Wandelt erkannte SQL-Schlüsselwörter nach Eingabe automatisch in Großbuchstaben um.
+        /// </summary>
+        /// <param name="sender">Quelle des Ereignisses.</param>
+        /// <param name="e">Enthält Tastaturdaten.</param>
         private void txtSqlQuery_KeyUp(object sender, KeyEventArgs e)
         {
-            if (e.KeyCode != Keys.Space && e.KeyCode != Keys.Enter && e.KeyCode != Keys.Tab)
-                return;
+            if (e.KeyCode == Keys.Space || e.KeyCode == Keys.Enter || e.KeyCode == Keys.Tab)
+            {
+                int selectionStart = txtSqlQuery.SelectionStart;
+                string originalText = txtSqlQuery.Text;
 
-            int pos = txtSqlQuery.SelectionStart;
-            string text = txtSqlQuery.Text;
+                string formattedText = FormatSqlPreserveCaret(originalText, selectionStart, out int newSelectionStart);
 
-            if (pos == 0) return;
+                if (formattedText != originalText)
+                {
+                    txtSqlQuery.Text = formattedText;
+                    txtSqlQuery.SelectionStart = newSelectionStart;
+                }
+            }
 
-            string before = text.Substring(0, pos);
-            string trimmed = before.TrimEnd();
-
-            int lastSpace = trimmed.LastIndexOf(' ');
-            string word = trimmed[(lastSpace + 1)..];
-
-            if (!_sqlKeywords.Contains(word)) return;
-
-            string upper = word.ToUpper();
-            txtSqlQuery.Text = text.Replace(word, upper);
-            txtSqlQuery.SelectionStart = pos;
+            ShowSqlSuggestions();
         }
 
-        // #############################
-        // REPORT TITLE GENERATOR
-        // Erstellt Namen aus SQL
-        // #############################
-
-        private string GenerateReportTitleFromSql(string sql)
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Fängt Enter und Tab ab, um die ausgewählte Vorschlagsoption direkt in das SQL-Feld einzufügen.
+        /// </summary>
+        /// <param name="sender">Quelle des Ereignisses.</param>
+        /// <param name="e">Enthält Tastaturdaten.</param>
+        private void txtSqlQuery_KeyDown(object sender, KeyEventArgs e)
         {
-            if (string.IsNullOrWhiteSpace(sql))
-                return "SQL_Report";
-
-            var match = Regex.Match(sql, @"FROM\s+(\w+)", RegexOptions.IgnoreCase);
-
-            string table = match.Success ? match.Groups[1].Value : "Report";
-
-            return "Bericht_" + table;
+            if (lstSqlSuggestions.Visible && lstSqlSuggestions.SelectedItem != null)
+            {
+                if (e.KeyCode == Keys.Enter || e.KeyCode == Keys.Tab)
+                {
+                    InsertSelectedSuggestionSmart();
+                    e.SuppressKeyPress = true;
+                }
+            }
         }
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Fügt den ausgewählten Vorschlag per Doppelklick ein.
+        /// </summary>
+        /// <param name="sender">Quelle des Ereignisses.</param>
+        /// <param name="e">Enthält Ereignisdaten.</param>
+        private void lstSqlSuggestions_DoubleClick(object sender, EventArgs e)
+        {
+            InsertSelectedSuggestion();
+        }
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Fügt den ausgewählten Vorschlag mit Enter ein.
+        /// </summary>
+        /// <param name="sender">Quelle des Ereignisses.</param>
+        /// <param name="e">Enthält Tastaturdaten.</param>
+        private void lstSqlSuggestions_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                InsertSelectedSuggestion();
+                e.Handled = true;
+            }
+        }
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Platzhalter für ein Designer-Ereignis.
+        /// </summary>
+        /// <param name="sender">Quelle des Ereignisses.</param>
+        /// <param name="e">Enthält Ereignisdaten.</param>
+        private void lstSqlSuggestions_SelectedIndexChanged(object sender, EventArgs e)
+        {
+        }
+
+        #endregion Event Handlers
+
+        #region Nested Types
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Beschreibt einen vollständigen Farbstil für eine hervorgehobene Grid-Zeile.
+        /// </summary>
+        private sealed class RowHighlightStyle
+        {
+            public Color BackColor { get; }
+            public Color ForeColor { get; }
+            public Color SelectionBackColor { get; }
+            public Color SelectionForeColor { get; }
+
+            private RowHighlightStyle(
+                Color backColor,
+                Color foreColor,
+                Color selectionBackColor,
+                Color selectionForeColor)
+            {
+                BackColor = backColor;
+                ForeColor = foreColor;
+                SelectionBackColor = selectionBackColor;
+                SelectionForeColor = selectionForeColor;
+            }
+
+            public static RowHighlightStyle Positive()
+            {
+                return new RowHighlightStyle(
+                    Color.Honeydew,
+                    Color.DarkGreen,
+                    Color.Honeydew,
+                    Color.DarkGreen);
+            }
+
+            public static RowHighlightStyle Negative()
+            {
+                return new RowHighlightStyle(
+                    Color.MistyRose,
+                    Color.DarkRed,
+                    Color.MistyRose,
+                    Color.DarkRed);
+            }
+
+            public static RowHighlightStyle Neutral()
+            {
+                return new RowHighlightStyle(
+                    Color.LightYellow,
+                    Color.DarkGoldenrod,
+                    Color.LightYellow,
+                    Color.DarkGoldenrod);
+            }
+
+            public static RowHighlightStyle Zero()
+            {
+                return new RowHighlightStyle(
+                    Color.WhiteSmoke,
+                    Color.Black,
+                    Color.WhiteSmoke,
+                    Color.Black);
+            }
+        }
+
+        #endregion Nested Types
     }
 }

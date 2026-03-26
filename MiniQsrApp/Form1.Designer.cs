@@ -33,10 +33,11 @@
             btnExportPdf = new Button();
             btnShowTabels = new Button();
             topPanel = new Panel();
+            lstSqlSuggestions = new ListBox();
             flowLayoutPanel1 = new FlowLayoutPanel();
             gridContainer = new Panel();
-            lblReportTitle = new Label();
             gridData = new DataGridView();
+            lblReportTitle = new Label();
             leftPanel = new Panel();
             treeDatabase = new TreeView();
             topPanel.SuspendLayout();
@@ -64,6 +65,7 @@
             // 
             // txtSqlQuery
             // 
+            txtSqlQuery.AutoCompleteMode = AutoCompleteMode.SuggestAppend;
             txtSqlQuery.BackColor = Color.FromArgb(224, 224, 224);
             txtSqlQuery.Dock = DockStyle.Top;
             txtSqlQuery.Location = new Point(10, 10);
@@ -71,7 +73,7 @@
             txtSqlQuery.Name = "txtSqlQuery";
             txtSqlQuery.PlaceholderText = "SQL Befehle:";
             txtSqlQuery.ScrollBars = ScrollBars.Vertical;
-            txtSqlQuery.Size = new Size(589, 221);
+            txtSqlQuery.Size = new Size(589, 414);
             txtSqlQuery.TabIndex = 1;
             txtSqlQuery.WordWrap = false;
             // 
@@ -110,14 +112,26 @@
             // topPanel
             // 
             topPanel.BackColor = SystemColors.Window;
+            topPanel.Controls.Add(lstSqlSuggestions);
             topPanel.Controls.Add(txtSqlQuery);
             topPanel.Controls.Add(flowLayoutPanel1);
             topPanel.Dock = DockStyle.Top;
             topPanel.Location = new Point(191, 0);
             topPanel.Name = "topPanel";
             topPanel.Padding = new Padding(10);
-            topPanel.Size = new Size(609, 294);
+            topPanel.Size = new Size(609, 487);
             topPanel.TabIndex = 3;
+            // 
+            // lstSqlSuggestions
+            // 
+            lstSqlSuggestions.FormattingEnabled = true;
+            lstSqlSuggestions.IntegralHeight = false;
+            lstSqlSuggestions.Location = new Point(13, 7);
+            lstSqlSuggestions.Name = "lstSqlSuggestions";
+            lstSqlSuggestions.Size = new Size(543, 417);
+            lstSqlSuggestions.TabIndex = 5;
+            lstSqlSuggestions.Visible = false;
+            lstSqlSuggestions.SelectedIndexChanged += lstSqlSuggestions_SelectedIndexChanged;
             // 
             // flowLayoutPanel1
             // 
@@ -126,7 +140,7 @@
             flowLayoutPanel1.Controls.Add(btnShowTabels);
             flowLayoutPanel1.Dock = DockStyle.Bottom;
             flowLayoutPanel1.FlowDirection = FlowDirection.RightToLeft;
-            flowLayoutPanel1.Location = new Point(10, 237);
+            flowLayoutPanel1.Location = new Point(10, 430);
             flowLayoutPanel1.Name = "flowLayoutPanel1";
             flowLayoutPanel1.Padding = new Padding(0, 5, 10, 5);
             flowLayoutPanel1.Size = new Size(589, 47);
@@ -138,27 +152,11 @@
             gridContainer.Controls.Add(gridData);
             gridContainer.Controls.Add(lblReportTitle);
             gridContainer.Dock = DockStyle.Fill;
-            gridContainer.Location = new Point(191, 294);
+            gridContainer.Location = new Point(191, 487);
             gridContainer.Name = "gridContainer";
             gridContainer.Padding = new Padding(10);
-            gridContainer.Size = new Size(609, 440);
+            gridContainer.Size = new Size(609, 247);
             gridContainer.TabIndex = 4;
-            // 
-            // lblReportTitle
-            // 
-            lblReportTitle.AutoSize = false;
-            lblReportTitle.Dock = DockStyle.Top;
-            lblReportTitle.Height = 36;
-            lblReportTitle.Font = new Font("Segoe UI", 10.8F, FontStyle.Bold, GraphicsUnit.Point, 0);
-            lblReportTitle.ForeColor = Color.Black;
-            lblReportTitle.Location = new Point(10, 10);
-            lblReportTitle.Name = "lblReportTitle";
-            lblReportTitle.Padding = new Padding(10, 10, 0, 0);
-            lblReportTitle.Size = new Size(73, 35);
-            lblReportTitle.TabIndex = 1;
-            lblReportTitle.Text = "label1";
-            lblReportTitle.TextAlign = ContentAlignment.MiddleLeft;
-            lblReportTitle.Visible = false;
             // 
             // gridData
             // 
@@ -166,11 +164,25 @@
             gridData.BorderStyle = BorderStyle.Fixed3D;
             gridData.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             gridData.Dock = DockStyle.Fill;
-            gridData.Location = new Point(10, 10);
+            gridData.Location = new Point(10, 45);
             gridData.Name = "gridData";
             gridData.RowHeadersWidth = 51;
-            gridData.Size = new Size(589, 420);
+            gridData.Size = new Size(589, 192);
             gridData.TabIndex = 0;
+            // 
+            // lblReportTitle
+            // 
+            lblReportTitle.Dock = DockStyle.Top;
+            lblReportTitle.Font = new Font("Segoe UI", 10.8F, FontStyle.Bold, GraphicsUnit.Point, 0);
+            lblReportTitle.ForeColor = Color.Black;
+            lblReportTitle.Location = new Point(10, 10);
+            lblReportTitle.Name = "lblReportTitle";
+            lblReportTitle.Padding = new Padding(10, 10, 0, 0);
+            lblReportTitle.Size = new Size(589, 35);
+            lblReportTitle.TabIndex = 1;
+            lblReportTitle.Text = "label1";
+            lblReportTitle.TextAlign = ContentAlignment.MiddleLeft;
+            lblReportTitle.Visible = false;
             // 
             // leftPanel
             // 
@@ -206,7 +218,6 @@
             topPanel.PerformLayout();
             flowLayoutPanel1.ResumeLayout(false);
             gridContainer.ResumeLayout(false);
-            gridContainer.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)gridData).EndInit();
             leftPanel.ResumeLayout(false);
             ResumeLayout(false);
@@ -225,5 +236,6 @@
         private TreeView treeDatabase;
         private FlowLayoutPanel flowLayoutPanel1;
         private Label lblReportTitle;
+        private ListBox lstSqlSuggestions;
     }
 }

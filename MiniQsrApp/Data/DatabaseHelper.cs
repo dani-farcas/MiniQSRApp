@@ -5,20 +5,21 @@ namespace MiniQsrApp.Data
 {
     public class DatabaseHelper
     {
-        // #############################
-        // FELDER
-        // Speichert Verbindungsdaten und Pfade
-        // #############################
+        #region Private Fields
 
         private readonly string _databasePath;
         private readonly string _connectionString;
         private readonly string _initScriptPath;
 
-        // #############################
-        // CONSTRUCTOR
-        // Validiert den DB-Pfad und bereitet alle internen Werte vor
-        // #############################
+        #endregion Private Fields
 
+        #region Constructors
+
+        /// --------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Initialisiert den Datenbankhelfer und bereitet alle benötigten Pfade sowie die Verbindungszeichenfolge vor.
+        /// </summary>
+        /// <param name="databasePath">Pfad zur SQLite-Datenbankdatei.</param>
         public DatabaseHelper(string databasePath)
         {
             if (string.IsNullOrWhiteSpace(databasePath))
@@ -31,19 +32,21 @@ namespace MiniQsrApp.Data
             _initScriptPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "init.sql");
         }
 
-        // #############################
-        // DATENBANK INITIALISIERUNG
-        // Liest das SQL-Setup-Skript und erstellt die DB-Struktur
-        // #############################
+        #endregion Constructors
 
+        #region Public Methods
+
+        /// --------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Initialisiert die Datenbank anhand des SQL-Initialisierungsskripts.
+        /// </summary>
         public void InitializeDatabase()
         {
             if (!File.Exists(_initScriptPath))
             {
                 throw new FileNotFoundException(
                     "Die Datei 'init.sql' wurde nicht gefunden.",
-                    _initScriptPath
-                );
+                    _initScriptPath);
             }
 
             string sqlScript = File.ReadAllText(_initScriptPath);
@@ -56,65 +59,127 @@ namespace MiniQsrApp.Data
             ExecuteNonQuery(sqlScript);
         }
 
-        // #############################
-        // TESTDATEN
-        // Fügt einen Testdatensatz in die Tabelle Test ein
-        // #############################
-
+        /// --------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Fügt einen Testdatensatz in die Tabelle Test ein.
+        /// </summary>
         public void InsertTestData()
         {
             const string sql = "INSERT INTO Test DEFAULT VALUES;";
             ExecuteNonQuery(sql);
         }
 
-        // #############################
-        // STANDARDDATEN LADEN
-        // Lädt alle Clients für die Standardanzeige
-        // #############################
-
+        /// --------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Lädt die Standarddaten aus der Tabelle Clients.
+        /// </summary>
+        /// <returns>Standarddaten als DataTable.</returns>
         public DataTable GetData()
         {
             const string sql = "SELECT * FROM Clients;";
             return ExecuteQuery(sql);
         }
 
-        // #############################
-        // BELIEBIGE SELECT-ABFRAGE
-        // Führt eine SQL-Abfrage aus und gibt das Ergebnis als DataTable zurück
-        // #############################
-
+        /// --------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Führt eine SELECT-Abfrage aus und gibt das Ergebnis als DataTable zurück.
+        /// </summary>
+        /// <param name="sql">Auszuführende SQL-Abfrage.</param>
+        /// <returns>Abfrageergebnis als DataTable.</returns>
         public DataTable RunQuery(string sql)
         {
             ValidateSql(sql);
             return ExecuteQuery(sql);
         }
 
-        // #############################
-        // BELIEBIGER SQL-BEFEHL
-        // Führt technische Befehle wie INSERT, UPDATE oder DELETE aus
-        // #############################
-
+        /// --------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Führt einen SQL-Befehl ohne Rückgabemenge aus.
+        /// </summary>
+        /// <param name="sql">Auszuführender SQL-Befehl.</param>
         public void ExecuteCommand(string sql)
         {
             ValidateSql(sql);
             ExecuteNonQuery(sql);
         }
 
-        // #############################
-        // CONNECTION ERZEUGEN
-        // Erstellt eine neue SQLite-Verbindung
-        // #############################
+        /// --------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Gibt alle Benutzertabellen der SQLite-Datenbank zurück.
+        /// </summary>
+        public List<string> GetTables()
+        {
+            List<string> tables = new();
 
+            DataTable dt = RunQuery("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
+
+            foreach (DataRow row in dt.Rows)
+            {
+                string? name = row["name"]?.ToString();
+
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    tables.Add(name);
+                }
+            }
+
+            return tables;
+        }
+
+        /// --------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Gibt alle Spaltennamen aus allen Benutzertabellen der Datenbank zurück.
+        /// Doppelte Namen werden entfernt.
+        /// </summary>
+        public List<string> GetAllColumns()
+        {
+            List<string> columns = new();
+            DataTable tables = RunQuery("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
+
+            foreach (DataRow tableRow in tables.Rows)
+            {
+                string tableName = tableRow["name"]?.ToString() ?? string.Empty;
+
+                if (string.IsNullOrWhiteSpace(tableName))
+                {
+                    continue;
+                }
+
+                DataTable tableInfo = RunQuery($"PRAGMA table_info({tableName})");
+
+                foreach (DataRow columnRow in tableInfo.Rows)
+                {
+                    string columnName = columnRow["name"]?.ToString() ?? string.Empty;
+
+                    if (!string.IsNullOrWhiteSpace(columnName) && !columns.Contains(columnName))
+                    {
+                        columns.Add(columnName);
+                    }
+                }
+            }
+
+            return columns;
+        }
+
+        #endregion Public Methods
+
+        #region Private Methods
+
+        /// --------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Erstellt eine neue SQLite-Verbindung auf Basis der aktuellen Verbindungszeichenfolge.
+        /// </summary>
+        /// <returns>Neue Instanz einer SQLite-Verbindung.</returns>
         private SqliteConnection CreateConnection()
         {
             return new SqliteConnection(_connectionString);
         }
 
-        // #############################
-        // SQL VALIDIERUNG
-        // Prüft, ob überhaupt SQL übergeben wurde
-        // #############################
-
+        /// --------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Prüft, ob eine gültige SQL-Anweisung übergeben wurde.
+        /// </summary>
+        /// <param name="sql">Zu prüfende SQL-Anweisung.</param>
         private static void ValidateSql(string sql)
         {
             if (string.IsNullOrWhiteSpace(sql))
@@ -123,11 +188,11 @@ namespace MiniQsrApp.Data
             }
         }
 
-        // #############################
-        // NON-QUERY AUSFÜHRUNG
-        // Führt SQL ohne Ergebnisliste aus
-        // #############################
-
+        /// --------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Führt eine SQL-Anweisung ohne Rückgabedaten aus.
+        /// </summary>
+        /// <param name="sql">Auszuführende SQL-Anweisung.</param>
         private void ExecuteNonQuery(string sql)
         {
             try
@@ -143,16 +208,16 @@ namespace MiniQsrApp.Data
             {
                 throw new InvalidOperationException(
                     $"Fehler beim Ausführen des SQL-Befehls: {ex.Message}",
-                    ex
-                );
+                    ex);
             }
         }
 
-        // #############################
-        // QUERY AUSFÜHRUNG
-        // Führt SELECT aus und lädt das Ergebnis in eine DataTable
-        // #############################
-
+        /// --------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Führt eine SQL-Abfrage aus und lädt das Ergebnis in eine DataTable.
+        /// </summary>
+        /// <param name="sql">Auszuführende SQL-Abfrage.</param>
+        /// <returns>Abfrageergebnis als DataTable.</returns>
         private DataTable ExecuteQuery(string sql)
         {
             try
@@ -165,7 +230,7 @@ namespace MiniQsrApp.Data
 
                 using var reader = command.ExecuteReader();
 
-                var table = new DataTable();
+                DataTable table = new();
                 table.Load(reader);
 
                 return table;
@@ -174,9 +239,10 @@ namespace MiniQsrApp.Data
             {
                 throw new InvalidOperationException(
                     $"Fehler beim Laden der Daten: {ex.Message}",
-                    ex
-                );
+                    ex);
             }
         }
+
+        #endregion Private Methods
     }
 }
