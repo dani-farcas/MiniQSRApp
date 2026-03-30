@@ -2,7 +2,6 @@
 using PdfSharp.Drawing;
 using PdfSharp.Pdf;
 using System.Data;
-using System.Drawing;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -45,6 +44,18 @@ namespace MiniQsrApp
 
         private List<string> _tableNames = new();
         private List<string> _columnNames = new();
+
+        private static readonly HashSet<string> CurrencyColumnNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Balance",
+            "Amount",
+            "TotalBalance",
+            "AverageBalance",
+            "TotalAmount",
+            "Gesamte Guthaben",
+            "Durchschnittliches Guthaben",
+            "Umsatz"
+        };
 
         #endregion Private Fields
 
@@ -100,8 +111,6 @@ namespace MiniQsrApp
 
             lstSqlSuggestions.DoubleClick += lstSqlSuggestions_DoubleClick;
             lstSqlSuggestions.KeyDown += lstSqlSuggestions_KeyDown;
-
-            gridData.DataBindingComplete += gridData_DataBindingComplete;
         }
 
         /// ----------------------------------------------------------------------------------------------------------------
@@ -209,8 +218,32 @@ namespace MiniQsrApp
             ResetGridBeforeBinding();
 
             gridData.DataSource = data;
+
+            ApplyCurrencyFormatting();
+
             gridData.Refresh();
             gridData.ClearSelection();
+        }
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Formatiert alle definierten Währungsspalten im deutschen Format.
+        /// </summary>
+        private void ApplyCurrencyFormatting()
+        {
+            CultureInfo germanCulture = new CultureInfo("de-DE");
+            germanCulture.NumberFormat.CurrencySymbol = "€";
+
+            foreach (DataGridViewColumn column in gridData.Columns)
+            {
+                if (!IsCurrencyColumn(column))
+                    continue;
+
+                column.DefaultCellStyle.Format = "C2";
+                column.DefaultCellStyle.FormatProvider = germanCulture;
+                column.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
+                column.DefaultCellStyle.NullValue = "0,00 €";
+            }
         }
 
         /// ----------------------------------------------------------------------------------------------------------------
@@ -226,212 +259,6 @@ namespace MiniQsrApp
 
         #endregion Data Execution
 
-        #region Grid Highlighting
-
-        /// ----------------------------------------------------------------------------------------------------------------
-        /// <summary>
-        /// Wird nach dem Binden neuer Daten ausgelöst und wendet die Highlight-Regeln stabil auf alle Zeilen an.
-        /// </summary>
-        /// <param name="sender">Quelle des Ereignisses.</param>
-        /// <param name="e">Enthält Ereignisdaten des DataBindings.</param>
-        private void gridData_DataBindingComplete(object sender, DataGridViewBindingCompleteEventArgs e)
-        {
-            ApplyHighlightingToGrid();
-            gridData.ClearSelection();
-        }
-
-        /// ----------------------------------------------------------------------------------------------------------------
-        /// <summary>
-        /// Wendet Highlight-Regeln auf alle Datenzeilen des Grids an.
-        /// </summary>
-        private void ApplyHighlightingToGrid()
-        {
-            foreach (DataGridViewRow row in gridData.Rows)
-            {
-                if (row.IsNewRow)
-                {
-                    continue;
-                }
-
-                ResetRowStyle(row);
-
-                RowHighlightStyle? style = ResolveHighlightStyle(row);
-
-                if (style != null)
-                {
-                    ApplyRowStyle(row, style);
-                }
-            }
-        }
-
-        /// ----------------------------------------------------------------------------------------------------------------
-        /// <summary>
-        /// Setzt den Standardstil einer Zeile zurück.
-        /// </summary>
-        /// <param name="row">Die zurückzusetzende Zeile.</param>
-        private void ResetRowStyle(DataGridViewRow row)
-        {
-            row.DefaultCellStyle.BackColor = Color.White;
-            row.DefaultCellStyle.ForeColor = Color.Black;
-            row.DefaultCellStyle.SelectionBackColor = Color.White;
-            row.DefaultCellStyle.SelectionForeColor = Color.Black;
-        }
-
-        /// ----------------------------------------------------------------------------------------------------------------
-        /// <summary>
-        /// Wendet den finalen Highlight-Stil auf eine Zeile an.
-        /// </summary>
-        /// <param name="row">Die zu formatierende Zeile.</param>
-        /// <param name="style">Der anzuwendende Stil.</param>
-        private void ApplyRowStyle(DataGridViewRow row, RowHighlightStyle style)
-        {
-            row.DefaultCellStyle.BackColor = style.BackColor;
-            row.DefaultCellStyle.ForeColor = style.ForeColor;
-            row.DefaultCellStyle.SelectionBackColor = style.SelectionBackColor;
-            row.DefaultCellStyle.SelectionForeColor = style.SelectionForeColor;
-        }
-
-        /// ----------------------------------------------------------------------------------------------------------------
-        /// <summary>
-        /// Ermittelt anhand allgemeiner Text- und Zahlenregeln, ob eine Zeile hervorgehoben werden soll.
-        /// </summary>
-        /// <param name="row">Die zu prüfende Zeile.</param>
-        /// <returns>Ein Highlight-Stil oder null, wenn keine Regel zutrifft.</returns>
-        private RowHighlightStyle? ResolveHighlightStyle(DataGridViewRow row)
-        {
-            bool hasNegativeNumber = false;
-            bool hasPositiveNumber = false;
-            bool hasZeroNumber = false;
-
-            foreach (DataGridViewCell cell in row.Cells)
-            {
-                object? value = cell.Value;
-
-                if (value == null || value == DBNull.Value)
-                {
-                    continue;
-                }
-
-                string text = value.ToString()?.Trim() ?? string.Empty;
-
-                if (string.IsNullOrWhiteSpace(text))
-                {
-                    continue;
-                }
-
-                string normalizedText = text.ToUpperInvariant();
-
-                if (ContainsNegativeKeyword(normalizedText))
-                {
-                    return RowHighlightStyle.Negative();
-                }
-
-                if (ContainsNeutralKeyword(normalizedText))
-                {
-                    return RowHighlightStyle.Neutral();
-                }
-
-                if (ContainsPositiveKeyword(normalizedText))
-                {
-                    return RowHighlightStyle.Positive();
-                }
-
-                if (TryParseDecimal(text, out decimal number))
-                {
-                    if (number < 0)
-                    {
-                        hasNegativeNumber = true;
-                    }
-                    else if (number > 0)
-                    {
-                        hasPositiveNumber = true;
-                    }
-                    else
-                    {
-                        hasZeroNumber = true;
-                    }
-                }
-            }
-
-            if (hasNegativeNumber)
-            {
-                return RowHighlightStyle.Negative();
-            }
-
-            if (hasPositiveNumber)
-            {
-                return RowHighlightStyle.Positive();
-            }
-
-            if (hasZeroNumber)
-            {
-                return RowHighlightStyle.Zero();
-            }
-
-            return null;
-        }
-
-        /// ----------------------------------------------------------------------------------------------------------------
-        /// <summary>
-        /// Prüft, ob ein Text einen negativen oder kritischen Begriff enthält.
-        /// </summary>
-        /// <param name="text">Bereits normalisierter Text in Großbuchstaben.</param>
-        /// <returns>True, wenn ein negativer Begriff erkannt wurde.</returns>
-        private bool ContainsNegativeKeyword(string text)
-        {
-            return text.Contains("RISIKO")
-                || text.Contains("FEHLER")
-                || text.Contains("KRITISCH")
-                || text.Contains("NEGATIV")
-                || text.Contains("ABGELEHNT")
-                || text.Contains("INAKTIV")
-                || text.Contains("OFFEN");
-        }
-
-        /// ----------------------------------------------------------------------------------------------------------------
-        /// <summary>
-        /// Prüft, ob ein Text einen positiven Begriff enthält.
-        /// </summary>
-        /// <param name="text">Bereits normalisierter Text in Großbuchstaben.</param>
-        /// <returns>True, wenn ein positiver Begriff erkannt wurde.</returns>
-        private bool ContainsPositiveKeyword(string text)
-        {
-            return text.Contains("AKTIV")
-                || text.Contains("OK")
-                || text.Contains("ERFOLG")
-                || text.Contains("BESTANDEN")
-                || text.Contains("ABGESCHLOSSEN")
-                || text.Contains("POSITIV");
-        }
-
-        /// ----------------------------------------------------------------------------------------------------------------
-        /// <summary>
-        /// Prüft, ob ein Text einen neutralen oder warnenden Begriff enthält.
-        /// </summary>
-        /// <param name="text">Bereits normalisierter Text in Großbuchstaben.</param>
-        /// <returns>True, wenn ein neutraler Begriff erkannt wurde.</returns>
-        private bool ContainsNeutralKeyword(string text)
-        {
-            return text.Contains("WARNUNG")
-                || text.Contains("NEUTRAL")
-                || text.Contains("PENDING")
-                || text.Contains("UNBEKANNT");
-        }
-
-        /// ----------------------------------------------------------------------------------------------------------------
-        /// <summary>
-        /// Versucht, einen Text robust als Dezimalzahl zu interpretieren.
-        /// </summary>
-        /// <param name="text">Zu interpretierender Text.</param>
-        /// <param name="number">Das erkannte numerische Ergebnis.</param>
-        /// <returns>True, wenn die Konvertierung erfolgreich war.</returns>
-        private bool TryParseDecimal(string text, out decimal number)
-        {
-            return decimal.TryParse(text, NumberStyles.Any, CultureInfo.CurrentCulture, out number)
-                || decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out number);
-        }
-
-        #endregion Grid Highlighting
 
         #region PDF Export
 
@@ -792,6 +619,42 @@ namespace MiniQsrApp
             return result.ToString();
         }
 
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Prüft, ob eine Spalte als Währungsfeld behandelt werden soll.
+        /// Kombiniert manuelle Definitionen und automatische Erkennung.
+        /// </summary>
+        private bool IsCurrencyColumn(DataGridViewColumn column)
+        {
+            string name = column.Name;
+
+            //  1. Manual override (de ex. "Gesamte Guthaben")
+            if (CurrencyColumnNames.Contains(name))
+                return IsNumeric(column);
+
+            //  2. Naming convention (_EUR)
+            if (name.EndsWith("", StringComparison.OrdinalIgnoreCase))
+                return IsNumeric(column);
+
+            //  2. Automatische Erkennung (technische Namen)
+            if (name.Contains("Balance", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("Amount", StringComparison.OrdinalIgnoreCase))
+                return IsNumeric(column);
+
+            return false;
+        }
+
+        /// ----------------------------------------------------------------------------------------------------------------
+        /// <summary>
+        /// Prüft, ob der Spaltentyp numerisch ist.
+        /// </summary>
+        private bool IsNumeric(DataGridViewColumn column)
+        {
+            return column.ValueType == typeof(decimal) ||
+                   column.ValueType == typeof(double) ||
+                   column.ValueType == typeof(float);
+        }
+
         #endregion SQL Formatting
 
         #region Panel Resizing
@@ -1017,68 +880,5 @@ namespace MiniQsrApp
 
         #endregion Event Handlers
 
-        #region Nested Types
-
-        /// ----------------------------------------------------------------------------------------------------------------
-        /// <summary>
-        /// Beschreibt einen vollständigen Farbstil für eine hervorgehobene Grid-Zeile.
-        /// </summary>
-        private sealed class RowHighlightStyle
-        {
-            public Color BackColor { get; }
-            public Color ForeColor { get; }
-            public Color SelectionBackColor { get; }
-            public Color SelectionForeColor { get; }
-
-            private RowHighlightStyle(
-                Color backColor,
-                Color foreColor,
-                Color selectionBackColor,
-                Color selectionForeColor)
-            {
-                BackColor = backColor;
-                ForeColor = foreColor;
-                SelectionBackColor = selectionBackColor;
-                SelectionForeColor = selectionForeColor;
-            }
-
-            public static RowHighlightStyle Positive()
-            {
-                return new RowHighlightStyle(
-                    Color.Honeydew,
-                    Color.DarkGreen,
-                    Color.Honeydew,
-                    Color.DarkGreen);
-            }
-
-            public static RowHighlightStyle Negative()
-            {
-                return new RowHighlightStyle(
-                    Color.MistyRose,
-                    Color.DarkRed,
-                    Color.MistyRose,
-                    Color.DarkRed);
-            }
-
-            public static RowHighlightStyle Neutral()
-            {
-                return new RowHighlightStyle(
-                    Color.LightYellow,
-                    Color.DarkGoldenrod,
-                    Color.LightYellow,
-                    Color.DarkGoldenrod);
-            }
-
-            public static RowHighlightStyle Zero()
-            {
-                return new RowHighlightStyle(
-                    Color.WhiteSmoke,
-                    Color.Black,
-                    Color.WhiteSmoke,
-                    Color.Black);
-            }
-        }
-
-        #endregion Nested Types
     }
 }
